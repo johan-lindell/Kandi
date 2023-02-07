@@ -1,0 +1,449 @@
+---
+title: "Kandi"
+author: "Johan Lindell"
+date: "5/27/2022"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## R Markdown
+
+Importing libraries
+```{r}
+library(reshape2)
+library(ggplot2)
+library(dplyr)
+library(patchwork) # To display 2 charts together
+library(hrbrthemes)
+library(factoextra)
+library(ggpubr)
+```
+
+```{r}
+# A few constants
+PABcolor <- "#69b3a2"
+GDPcolor <- rgb(0.2, 0.6, 0.9, 1)
+GDPCcolor <-rgb(0.7, 0.3, 0.4, 1)
+
+set.seed(123)
+```
+
+Importing and formatting data
+
+INFO: PAB has many NA values, we have 21 complete cases (without NA)
+```{r}
+#GDP data
+
+#GDP/CAPITA TOTAL
+GDPC <- read.csv("GDP-CAP.csv") #, header = T, sep=";", check.names=FALSE)
+#GDP GROWTH
+GDP <- read.csv("GDP.csv", header = T, sep=";", check.names=FALSE)
+
+#Subjective well-being data
+NAB <- read.csv("NAB.csv", header = T, sep=";")
+NAB_filtered <- NAB[, c("LOCATION", "TIME", "VALUE")]
+NAB_filtered$VALUE <- 100 - NAB_filtered$VALUE
+PAB <- dcast(NAB_filtered, LOCATION ~ TIME)
+
+#REMOVE YEARS 2020 and 2021 from data
+GDPC = GDPC[,!(names(GDPC) %in% c("2020", "2021"))]
+GDP = GDP[,!(names(GDP) %in% c("2020", "2021"))]
+PAB = PAB[,!(names(PAB) %in% c("2020"))]
+
+PAB <- PAB[complete.cases(PAB$`2007` + PAB$`2008` + PAB$`2009` + PAB$`2010`),]
+
+#Only use data from countries with PAB data
+GDP <- GDP[GDP$LOCATION %in% PAB$LOCATION,]
+GDPC <- GDPC[GDPC$LOCATION %in% PAB$LOCATION,]
+PAB <- PAB[PAB$LOCATION %in% GDP$LOCATION,]
+
+#Add country codes to row names
+row.names(PAB) <- PAB[["LOCATION"]]
+row.names(GDP) <- GDP[["LOCATION"]]
+row.names(GDPC) <- GDPC[["LOCATION"]]
+
+#remove location column
+PAB <- PAB[,2:15]
+GDP <- GDP[,2:15]
+GDPC <- GDPC[,2:15]
+
+
+```
+
+
+Defining plot functions
+```{r}
+plotTimeseries1 <- function(data, y_label, x_label) {
+  nn <- ncol(data)
+  par(mar=c(5.1, 4.1, 4.1, 8.1), xpd=TRUE)
+  #surpressing warnings as data contains NaN values for years when data is missing
+  suppressWarnings(matplot(2006:2019,t(data), type="l", xlim=c(2006,2019),ylab=y_label, xlab=x_label))
+  legend("topright", inset=c(-0.2,0), row.names(data),col=seq_len(nn),cex=0.8,fill=seq_len(nn))
+}
+```
+
+
+
+Plotting Positive affect balance
+```{r}
+
+plotTimeseries1(PAB[1:11,], "Postive affect balance (%)", "Time (years)")
+plotTimeseries1(PAB[12:21,], "Postive affect balance (%)", "Time (years)")
+#plotTimeseries1(PAB[21:30,], "Postive affect balance (%)", "Time (years)")
+#plotTimeseries1(PAB[31:40,], "Postive affect balance (%)", "Time (years)")
+```
+Plotting GDP/capita
+```{r}
+plotTimeseries1(GDPC[1:11,], "Gross domestic product (USD/capita) ", "Time (years)")
+plotTimeseries1(GDPC[12:21,], "Gross domestic product (USD/capita) ", "Time (years)")
+#plotTimeseries1(GDPC[21:30,], "Gross domestic product (USD/capita) ", "Time (years)")
+#plotTimeseries1(GDPC[31:40,], "Gross domestic product (USD/capita) ", "Time (years)")
+```
+Plotting GDP % increase
+```{r}
+plotTimeseries1(GDP[1:11,], "Gross domestic product (%) ", "Time (years)")
+plotTimeseries1(GDP[12:21,], "Gross domestic product (%) ", "Time (years)")
+#plotTimeseries1(GDP[21:30,], "Gross domestic product (%) ", "Time (years)")
+#plotTimeseries1(GDP[31:40,], "Gross domestic product (%) ", "Time (years)")
+```
+```{r}
+comparePlot <- function(PAB_data, GDP_data, main, y_lab, x_lab, year) {
+  pab <- PAB_data[complete.cases(PAB_data[year]),]
+  gdp <- GDP_data[row.names(GDP_data) %in% row.names(pab),]
+  plot(gdp[[year]], pab[[year]], main=paste(main, year, sep=" "), ylab=y_lab, xlab=x_lab, ylim=c(73.5, 95))
+  text(gdp[[year]],pab[[year]]-1, row.names(pab))
+}
+```
+
+```{r}
+compareLinearModel <- function(PAB_data, GDP_data, main, y_lab, x_lab, year) {
+  
+  pab <- PAB_data[complete.cases(PAB_data[year]),]
+  gdp <- GDP_data[row.names(GDP_data) %in% row.names(pab),]
+  relation <- lm(pab[[year]]~gdp[[year]])
+  print(year)
+  print(relation)
+  plot(gdp[[year]], pab[[year]], main=paste(main, year, sep=" "), ylab=y_lab, xlab=x_lab, ylim=c(73.5, 95))
+  text(gdp[[year]],pab[[year]]-1, row.names(pab))
+  abline(lm(PAB_data[[year]]~GDP_data[[year]]),cex = 1.3,pch = 16, col ="red")
+}
+```
+
+```{r}
+compareLinearPolyModel <- function(PAB_data, GDP_data, main, y_lab, x_lab, year) {
+  
+  pab <- PAB_data[complete.cases(PAB_data[year]),]
+  gdp <- GDP_data[row.names(GDP_data) %in% row.names(pab),]
+  relation <- lm(pab[[year]]~poly(gdp[[year]], 2))
+  plot(gdp[[year]], pab[[year]], main=paste(main, year, sep=" "), ylab=y_lab, xlab=x_lab, ylim=c(73.5, 95))
+  text(gdp[[year]],pab[[year]]-1, row.names(pab))
+  abline(lm(PAB_data[[year]]~GDP_data[[year]]),cex = 1.3,pch = 16, col ="red")
+}
+```
+
+PLOT BEFORE, DURING AND AFTER HOUSING CRISIS
+
+```{r}
+compareLinearModel(PAB, GDP, "Positive Affect Balance v. GDP Growth", "Positive affect balance (%)", "GDP growth (%)", "2006")
+compareLinearModel(PAB, GDP, "Positive Affect Balance v. GDP Growth", "Positive affect balance (%)", "GDP growth (%)", "2007")
+compareLinearModel(PAB[!(row.names(PAB) %in% c("LTU", "LVA", "EST")),], GDP[!(row.names(GDP) %in% c("LTU", "LVA", "EST")),], "Positive Affect Balance v. GDP Growth (Excl. LTU)", "Positive affect balance (%)", "GDP growth (%)", "2007")
+#compareLinearModel(PAB[!(PAB$LOCATION %in% c("LTU")),], GDP[!(GDP$LOCATION %in% c("LTU")),], "Positive Affect Balance v. GDP Growth (Excl. LTU)", "Positive affect balance (%)", "GDP growth (%)", "2007")
+compareLinearModel(PAB, GDP, "Positive Affect Balance v. GDP Growth", "Positive affect balance (%)", "GDP growth (%)", "2008")
+compareLinearModel(PAB, GDP, "Positive Affect Balance v. GDP Growth", "Positive affect balance (%)", "GDP growth (%)", "2009")
+compareLinearModel(PAB[!(row.names(PAB) %in% c("LTU", "LVA", "EST")),], GDP[!(row.names(GDP) %in% c("LTU", "LVA", "EST")),], "Positive Affect Balance v. GDP Growth (Excl. LTU)", "Positive affect balance (%)", "GDP growth (%)", "2009")
+compareLinearModel(PAB, GDP, "Positive Affect Balance v. GDP Growth", "Positive affect balance (%)", "GDP growth (%)", "2010")
+# compareLinearModel(PAB, GDP, "Positive Affect Balance v. GDP Growth", "Positive affect balance (%)", "GDP growth (%)", "2011")
+# compareLinearModel(PAB, GDP, "Positive Affect Balance v. GDP Growth", "Positive affect balance (%)", "GDP growth (%)", "2012")
+# compareLinearModel(PAB, GDP, "Positive Affect Balance v. GDP Growth", "Positive affect balance (%)", "GDP growth (%)", "2013")
+# compareLinearModel(PAB, GDP, "Positive Affect Balance v. GDP Growth", "Positive affect balance (%)", "GDP growth (%)", "2014")
+# compareLinearModel(PAB, GDP, "Positive Affect Balance v. GDP Growth", "Positive affect balance (%)", "GDP growth (%)", "2015")
+# compareLinearModel(PAB, GDP, "Positive Affect Balance v. GDP Growth", "Positive affect balance (%)", "GDP growth (%)", "2016")
+# compareLinearModel(PAB, GDP, "Positive Affect Balance v. GDP Growth", "Positive affect balance (%)", "GDP growth (%)", "2017")
+# compareLinearModel(PAB, GDP, "Positive Affect Balance v. GDP Growth", "Positive affect balance (%)", "GDP growth (%)", "2018")
+
+```
+
+```{r}
+comparePlot(PAB, GDPC, "Positive Affect Balance v. GDP", "Positive affect balance (%)", "GDP (USD/capita)", "2007")
+comparePlot(PAB, GDPC, "Positive Affect Balance v. GDP", "Positive affect balance (%)", "GDP (USD/capita)", "2008")
+comparePlot(PAB, GDP, "Positive Affect Balance v. GDP", "Positive affect balance (%)", "GDP growth (%)", "2009")
+# comparePlot(PAB, GDPC, "Positive Affect Balance v. GDP", "Positive affect balance (%)", "GDP (USD/capita)", "2010")
+# comparePlot(PAB, GDPC, "Positive Affect Balance v. GDP", "Positive affect balance (%)", "GDP (USD/capita)", "2011")
+# comparePlot(PAB, GDPC, "Positive Affect Balance v. GDP", "Positive affect balance (%)", "GDP (USD/capita)", "2012")
+# comparePlot(PAB, GDPC, "Positive Affect Balance v. GDP", "Positive affect balance (%)", "GDP (USD/capita)", "2013")
+# comparePlot(PAB, GDPC, "Positive Affect Balance v. GDP", "Positive affect balance (%)", "GDP (USD/capita)", "2014")
+# comparePlot(PAB, GDPC, "Positive Affect Balance v. GDP", "Positive affect balance (%)", "GDP (USD/capita)", "2015")
+# comparePlot(PAB, GDPC, "Positive Affect Balance v. GDP", "Positive affect balance (%)", "GDP (USD/capita)", "2016")
+# comparePlot(PAB, GDPC, "Positive Affect Balance v. GDP", "Positive affect balance (%)", "GDP (USD/capita)", "2017")
+```
+
+```{r}
+
+colors <- c("red", "blue", "green", "yellow")
+clusters <- c("Cluster 1", "Cluster 2", "Cluster 3", "Cluster 4")
+#normalize data (return vector will have var = 1 and mean = 0)
+normData <- function(data) {
+  result <- (data - mean(data)) / sd(data)
+}
+
+clusterData <- function(year, noClusters = 2) {
+  PAB <- PAB[complete.cases(PAB[year]),]
+  GDPC <- GDPC[row.names(GDPC) %in% row.names(PAB),]
+  normPAB <- normData(PAB[[year]])
+  normGDPC <- normData(GDPC[[year]])
+  
+  kmeansDataNorm <- data.frame(
+    GDPC = normGDPC,
+    PAB = normPAB
+  )
+  
+  kmeansData <- data.frame(
+    GDPC = GDPC[[year]],
+    PAB = PAB[[year]]
+  )
+  
+  km.res <- kmeans(kmeansDataNorm, noClusters, 50)
+  
+  
+  fviz_cluster(km.res, kmeansData, stand = F, xlab="GDP (USD/capita)", ylab="Positive affect balance (%)", main=paste(year, "PAB and GDP clusters", sep=" "), show.clust.cent = F )
+  PAB <- cbind(PAB, cluster = km.res$cluster)
+  
+  pab <- PAB[complete.cases(PAB[year]),]
+  gdp <- GDPC[row.names(GDPC) %in% row.names(pab),]
+  
+  
+  plot(gdp[[year]], pab[[year]], main=paste("PAB and GDP Cluster Regression", year, sep=" "), ylim=c(73.5, 95), ylab="Postivie affect balance (%)", xlab="GDP (USD/capita)", col = colors[pab$cluster])
+  #fviz_cluster(km.res, kmeansData, stand = F, xlab="GDP (USD/capita)", ylab="Positive affect balance (%)", main=paste(year, "PAB and GDP clusters", sep=" "), show.clust.cent = F )
+  
+ 
+  text(gdp[[year]],pab[[year]]-1, row.names(pab))
+  
+  for (n in 1:noClusters) {
+    pabCluster <- pab[pab$cluster == n,]
+    gdpCluster <- gdp[row.names(gdp) %in% row.names(pabCluster),]
+    abline(lm(pabCluster[[year]]~gdpCluster[[year]]),cex = 1.3,pch = 16, col =colors[n])
+  }
+  
+   legend("bottomright", legend=clusters[1:noClusters], col=colors[1:noClusters], lty=1, cex=0.8)
+  
+
+}
+
+par(mfrow=c(2,2))
+clusterData("2007", 2)
+clusterData("2008", 2)
+clusterData("2009", 2)
+clusterData("2010", 3)
+legend("topright", inset=c(-0.2, 0), legend=c("df1","df2"), pch=c(1,3), title="Data")
+
+#clusterData("2011", 3)
+# clusterData("2012", 3)
+# clusterData("2013", 3)
+# clusterData("2014", 2)
+# clusterData("2015", 3)
+# clusterData("2016", 3)
+# clusterData("2017", 3)
+# clusterData("2018", 3)
+
+
+```
+
+
+
+```{r}
+countryPABGDP <- function(countryCode) {
+data <- data.frame(
+  year = as.numeric(colnames(PAB)),
+  PAB = (as.numeric(PAB[row.names(PAB) == countryCode,]) - 80),
+  GDP = as.numeric(GDP[row.names(GDP) == countryCode,])
+)
+
+ggplot(data, aes(x=year)) +
+  geom_line(aes(y=PAB), color=PABcolor) +
+  geom_line(aes(y=GDP), color=GDPcolor) +
+  scale_y_continuous( name = "GDP growth (%)", sec.axis = sec_axis(~.*1 + 80, name = "Positive affect balance (%)")) +
+  theme_ipsum() +
+  theme(
+    axis.title.y = element_text(color=GDPcolor, size=13),
+    axis.title.y.right = element_text(color=PABcolor, size=13)
+  ) #+
+  #ggtitle(paste(country, "GDP growth and PAB", sep=" ")))
+
+}
+
+countryPABGDPC <- function(countryCode) {
+  
+gdpc <- as.numeric(GDPC[row.names(GDPC) == countryCode,])
+
+ if (mean(gdpc) > 20000) {
+   scale <- 5000
+ } else {
+   scale <- 1000
+ }
+
+data <- data.frame(
+  year = as.numeric(colnames(PAB)),
+  PAB = (as.numeric(PAB[row.names(PAB) == countryCode,] - 80) * scale),
+  GDPC =  gdpc
+)
+
+ggplot(data, aes(x=year)) +
+  geom_line(aes(y=PAB), color=PABcolor) +
+  geom_line(aes(y=GDPC), color=GDPCcolor) +
+  scale_y_continuous( name = "GDP/capita (USD)", sec.axis = sec_axis(~./scale + 80, name = "Positive affect balance (%)")) +
+  theme_ipsum() +
+  theme(
+    axis.title.y = element_text(color=GDPCcolor, size=13),
+    axis.title.y.right = element_text(color=PABcolor, size=13)
+  ) #+
+  #ggtitle(paste(countryCode, "GDP/capita and PAB", sep=" "))
+
+}
+```
+
+```{r}
+for (country in row.names(PAB)) {
+  countryPABGDP(country)
+}
+```
+
+```{r}
+
+countries <- row.names(PAB)
+
+for (country in countries[1:4]) {
+  
+  countryPABGDPC(country)
+}
+
+for (country in countries[5:8]) {
+  print(country)
+  countryPABGDPC(country)
+}
+
+for (country in countries[9:12]) {
+  print(country)
+  countryPABGDPC(country)
+}
+
+for (country in countries[13:16]) {
+  print(country)
+  countryPABGDPC(country)
+}
+
+```
+
+
+```{r}
+
+ggarrange(countryPABGDPC(countries[1]), countryPABGDPC(countries[2]), countryPABGDPC(countries[3]), countryPABGDPC(countries[4]),
+                    labels = countries[1:4],
+                    ncol = 2, nrow = 2)
+
+ggarrange(countryPABGDPC(countries[5]), countryPABGDPC(countries[6]), countryPABGDPC(countries[7]), countryPABGDPC(countries[8]),
+                    labels = countries[5:8],
+                    ncol = 2, nrow = 2)
+
+ggarrange(countryPABGDPC(countries[9]), countryPABGDPC(countries[10]), countryPABGDPC(countries[11]), countryPABGDPC(countries[12]),
+                    labels = countries[9:12],
+                    ncol = 2, nrow = 2)
+
+ggarrange(countryPABGDPC(countries[13]), countryPABGDPC(countries[14]), countryPABGDPC(countries[15]), countryPABGDPC(countries[16]),
+                    labels = countries[13:16],
+                    ncol = 2, nrow = 2)
+
+ggarrange(countryPABGDPC(countries[17]), countryPABGDPC(countries[18]), countryPABGDPC(countries[19]), countryPABGDPC(countries[20]), countryPABGDPC(countries[21]),
+                    labels = countries[16:21],
+                    ncol = 3, nrow = 2)
+
+
+                    
+```
+
+```{r}
+
+ggarrange(countryPABGDP(countries[1]), countryPABGDP(countries[2]), countryPABGDP(countries[3]), countryPABGDP(countries[4]),
+                    labels = countries[1:4],
+                    ncol = 2, nrow = 2)
+
+ggarrange(countryPABGDP(countries[5]), countryPABGDP(countries[6]), countryPABGDP(countries[7]), countryPABGDP(countries[8]),
+                    labels = countries[5:8],
+                    ncol = 2, nrow = 2)
+
+ggarrange(countryPABGDP(countries[9]), countryPABGDP(countries[10]), countryPABGDP(countries[11]), countryPABGDP(countries[12]),
+                    labels = countries[9:12],
+                    ncol = 2, nrow = 2)
+
+ggarrange(countryPABGDP(countries[13]), countryPABGDP(countries[14]), countryPABGDP(countries[15]), countryPABGDP(countries[16]),
+                    labels = countries[13:16],
+                    ncol = 2, nrow = 2)
+
+ggarrange(countryPABGDP(countries[17]), countryPABGDP(countries[18]), countryPABGDP(countries[19]), countryPABGDP(countries[20]), countryPABGDP(countries[21]),
+                    labels = countries[16:21],
+                    ncol = 3, nrow = 2)
+
+
+                    
+```
+
+```{r}
+PAB$"2006"[is.na(PAB$"2006")] <- mean(PAB$"2006", na.rm = TRUE)
+pabData <- colSums(PAB) / dim(PAB)[1]
+```
+
+```{r}
+
+scale <- 4000
+
+data <- data.frame(
+  year = as.numeric(colnames(PAB)),
+  PAB = (colSums(PAB) / dim(PAB)[1] - 80) * scale,
+  GDPC =  colSums(GDPC) / dim(GDPC)[1]
+)
+cor.test(colSums(GDPC) / dim(GDPC)[1], colSums(PAB) / dim(PAB)[1], method=c("pearson", "kendall", "spearman"))
+
+ggscatter(data, x = "PAB", y = "GDPC", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "Miles/(US) gallon", ylab = "Weight (1000 lbs)")
+
+ggplot(data, aes(x=year)) +
+  geom_line(aes(y=PAB), color=PABcolor) +
+  geom_line(aes(y=GDPC), color=GDPCcolor) +
+  scale_y_continuous( name = "GDP/capita (USD)", sec.axis = sec_axis(~./scale + 80, name = "Positive affect balance (%)")) +
+  theme_ipsum() +
+  theme(
+    axis.title.y = element_text(color=GDPCcolor, size=13),
+    axis.title.y.right = element_text(color=PABcolor, size=13)
+  )
+              
+```
+
+```{r}
+
+
+data <- data.frame(
+  year = as.numeric(colnames(PAB)),
+  PAB = (colSums(PAB) / dim(PAB)[1] - 80),
+  GDP = colSums(GDP) / dim(GDP)[1]
+)
+
+ggscatter(data, x = "PAB", y = "GDP", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "Miles/(US) gallon", ylab = "Weight (1000 lbs)")
+
+ggplot(data, aes(x=year)) +
+  geom_line(aes(y=PAB), color=PABcolor) +
+  geom_line(aes(y=GDP), color=GDPcolor) +
+  scale_y_continuous( name = "GDP growth (%)", sec.axis = sec_axis(~.*1 + 80, name = "Positive affect balance (%)")) +
+  theme_ipsum() +
+  theme(
+    axis.title.y = element_text(color=GDPcolor, size=13),
+    axis.title.y.right = element_text(color=PABcolor, size=13)
+  )
+              
+```
